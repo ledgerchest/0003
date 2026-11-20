@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LedgerChest™ | BOX-0003</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 50px 15px 30px;
+      background: #f4f4f4;
+      color: #222;
+    }
+    h1 { margin: 0 0 28px; }
+    #controllerBox {
+      background: white;
+      width: 350px;
+      max-width: calc(100% - 10px);
+      margin: 0 auto 28px;
+      padding: 25px;
+      border-radius: 15px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    #controllerLabel { font-size: 18px; margin-bottom: 10px; }
+    #blockchainLabel { margin-top: 10px; font-size: 14px; color: #666; }
+    button {
+      display: block;
+      width: 250px;
+      max-width: 100%;
+      padding: 20px;
+      margin: 20px auto;
+      font-size: 24px;
+      font-weight: bold;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    #lockButton { background: #4CAF50; color: white; }
+    #unlockButton { background: #f44336; color: white; }
+    #setPasscodeButton { background: #333; color: white; }
+    #reportUsageButton { background: #2767b2; color: white; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #ledgerHistory {
+      display: inline-block;
+      margin: 8px auto 0;
+      color: #245da8;
+      font-size: 16px;
+      text-decoration: underline;
+    }
+    #status {
+      margin: 28px auto 0;
+      max-width: 500px;
+      font-size: 16px;
+      font-weight: bold;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    #note {
+      max-width: 440px;
+      margin: 12px auto;
+      color: #777;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <h1>LedgerChest™</h1>
+
+  <div id="controllerBox">
+    <div id="controllerLabel">LedgerChest Controller · BOX-0003</div>
+    <div id="blockchainLabel">Blockchain Command Control · Monad</div>
+  </div>
+
+  <button id="lockButton" onclick="runAction('lock')">LOCK</button>
+  <button id="unlockButton" onclick="runAction('unlock')">UNLOCK</button>
+  <button id="setPasscodeButton" onclick="runAction('resetPasscode')">SET PASSCODE</button>
+  <button id="reportUsageButton" onclick="runAction('reportUsage')">REPORT USAGE</button>
+
+  <a id="ledgerHistory"
+     href="https://monadscan.com/address/0x01D96BE5f0b93f6Ab4EdC0D8fC4f2184441cD476#events"
+     target="_blank" rel="noopener noreferrer">Ledger History</a>
+
+  <div id="status" role="status" aria-live="polite">Ready.</div>
+  <div id="note">
+    Transactions and published usage records are public on the blockchain.
+    Do not publish private information.
+  </div>
+
+  <script>
+    // BOX-0003 deployed contract on Monad Mainnet.
+    const CONTRACT_ADDRESS = "0x01D96BE5f0b93f6Ab4EdC0D8fC4f2184441cD476";
+    const MONAD_CHAIN_ID = 143n;
+
+    // The usage-history endpoint must return:
+    // { "timestamps": [unixSeconds, ...], "timeVerified": [true/false, ...] }
+    const USAGE_HISTORY_URL =
+      "https://idiotbox-server.onrender.com/api/usage-history/BOX-0003";
+
+    const CONTRACT_ABI = [
+      "function lock(string message)",
+      "function unlock(string message)",
+      "function resetPasscode()",
+      "function publishUsageHistory(uint64[] timestamps, bool[] timeVerified)"
+    ];
+
+    function setStatus(message) {
+      document.getElementById("status").textContent = message;
+    }
+
+    async function getContract() {
+      if (!window.ethereum) {
+        throw new Error("No compatible wallet detected. Open this page in your wallet browser or install a compatible wallet.");
+      }
+
+      setStatus("Connecting to wallet...");
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+
+      const network = await provider.getNetwork();
+      if (network.chainId !== MONAD_CHAIN_ID) {
+        throw new Error("Please switch your wallet to Monad Mainnet (Chain ID 143).");
+      }
+
+      const signer = await provider.getSigner();
+      return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+    }
+
+    async function runAction(action) {
+      const buttons = [
+        "lockButton", "unlockButton", "setPasscodeButton", "reportUsageButton"
+      ].map(id => document.getElementById(id));
+
+      buttons.forEach(button => button.disabled = true);
+
+      try {
+        const contract = await getContract();
+        let transaction;
+
+        if (action === "lock") {
+          setStatus("Approve LOCK in your wallet...");
+          transaction = await contract.lock("");
+        } else if (action === "unlock") {
+          setStatus("Approve UNLOCK in your wallet...");
+          transaction = await contract.unlock("");
+        } else if (action === "resetPasscode") {
+          setStatus("Approve SET PASSCODE in your wallet...");
+          transaction = await contract.resetPasscode();
+        } else if (action === "reportUsage") {
+          setStatus("Retrieving the latest usage history from LedgerChest...");
+          const response = await fetch(USAGE_HISTORY_URL, {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            cache: "no-store"
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              "The server could not provide usage history. The BOX-0003 usage-history endpoint must be added to the server first."
+            );
+          }
+
+          const history = await response.json();
+          const timestamps = history.timestamps;
+          const timeVerified = history.timeVerified;
+
+          if (!Array.isArray(timestamps) || !Array.isArray(timeVerified) ||
+              timestamps.length !== timeVerified.length) {
+            throw new Error("The server returned usage history in an unexpected format.");
+          }
+          if (timestamps.length === 0) {
+            throw new Error("There are no usage records to publish yet.");
+          }
+          if (timestamps.length > 15) {
+            throw new Error("The server returned more than 15 records. Only the latest 15 can be published.");
+          }
+
+          setStatus("Approve REPORT USAGE in your wallet...");
+          transaction = await contract.publishUsageHistory(timestamps, timeVerified);
+        }
+
+        setStatus("Transaction submitted. Waiting for Monad confirmation...");
+        await transaction.wait();
+        setStatus("Transaction confirmed on Monad. " + transaction.hash);
+      } catch (error) {
+        console.error("LedgerChest transaction error:", error);
+        if (error.code === 4001 || error.code === "ACTION_REJECTED") {
+          setStatus("Transaction cancelled in wallet.");
+        } else {
+          setStatus(error.message || "Transaction failed. Check your wallet, network, and contract.");
+        }
+      } finally {
+        buttons.forEach(button => button.disabled = false);
+      }
+    }
+  </script>
+</body>
+</html>
